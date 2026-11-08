@@ -1,0 +1,38 @@
+# ============================================================================
+#  training/requirements.txt
+#  目标环境: Windows / WSL2, CUDA 12.4+, RTX 5060 8GB, Python 3.10 - 3.12
+#
+#  安装（推荐顺序）:
+#    1) 先装匹配 CUDA 12.4 的 PyTorch
+#       pip install torch --index-url https://download.pytorch.org/whl/cu124
+#    2) 再装本文件
+#       pip install -r training/requirements.txt
+#
+#  ⚠ 不要安装 flash-attn（RTX 5060 sm_120 兼容性未验证）
+#  ⚠ 不要安装 deepspeed（单卡不需要）
+# ============================================================================
+
+# --- 训练核心 ---
+# 注意：unsloth 2026.x 需要 transformers 5.x / trl 0.2x，因此不设上限；
+#       train_qlora.py 已用 inspect 自适应新旧 SFTTrainer 签名，版本漂移不会报错。
+#       也不要手动升级/降级 torch：当前 torch 2.11.0+cu128 是 RTX 5060 (sm_120) 可用的关键。
+unsloth>=2026.9
+transformers>=4.46
+trl>=0.12
+peft>=0.13
+accelerate>=1.0
+bitsandbytes>=0.44
+datasets>=3.0
+
+# --- 数据与配置 ---
+pyyaml>=6.0
+huggingface_hub>=0.26
+safetensors>=0.4
+
+# --- 部署 ---
+# ollama 通过官方安装包获取；GGUF 量化需自行构建 llama.cpp
+# (serve.sh 会自动检测，缺失时给出提示)
+
+# --- 开发辅助 ---
+tqdm>=4.66
+rich>=13.0

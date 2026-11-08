@@ -1,0 +1,351 @@
+Description: Blue team IDS focused triage collection
+Author: blue-team-agent
+Version: 1.3
+Id: 3f9c1b7e-5a44-4f21-9d6e-0b1c2d3e4f50
+RecreateDirectories: true
+
+# IMPORTANT: this file MUST stay pure ASCII.
+# KAPE reads .tkape/.mkape as ANSI (not UTF-8), so any non-ASCII byte makes the
+# file fail with "Syntax error in ..." and the whole target silently disappears
+# from --tlist. An earlier revision had Chinese comments and was rejected.
+# Keep explanations in docs/, not in the file.
+#
+# Structure: every entry under Targets: starts with its own "-" line and keys
+# are indented one further level past the "-".
+#
+# ============================================================================
+# SYNTAX FACTS ESTABLISHED BY MEASUREMENT (KAPE 1.3.0.2), see docs/FORENSICS_KAPE.md
+# ============================================================================
+# 1. FileMask does NOT support semicolon-separated lists. A mask such as
+#    "*.exe;*.dll" matches ZERO files silently - no error, no warning. v1.2
+#    used that form and collected nothing from those entries.
+#    For multiple extensions use the official regex form, UNQUOTED:
+#        FileMask: regex:*.+\.(exe|dll)
+#    Quoting it in double quotes is a YAML error ("unknown escape character"
+#    at the \.). 8 shipped community targets use the unquoted regex: form.
+# 2. Exact single-name masks work and are the safest way to name a channel:
+#        FileMask: "Security.evtx"
+# 3. Recursive: false is valid and means "this directory only".
+# 4. Regex masks are matched against the FULL PATH, not the bare file name.
+#    An unanchored alternation therefore over-matches: the pattern
+#    .*(Security|System|Application)\.evtx also matches
+#    Microsoft-Windows-SMBServer%4Security.evtx. Measured. This is why the
+#    event log channels below are listed one by one with exact names instead.
+# 5. KAPE expands targets into a set of unique source paths, so the same file
+#    referenced by two entries is collected once.
+#
+# ============================================================================
+# SIZE DECISION, MEASURED ON A REAL HOST (see docs/FORENSICS_KAPE.md section 3.3)
+# ============================================================================
+# v1.1 collected Path C:\Users\%user% FileMask *.exe Recursive true and produced
+# 17826 MB, of which ~16.5 GB was vendor installers and developer tool caches
+# (UnitySetup 3.5 GB, OllamaSetup 1.5 GB and 1.2 GB, VS Code extension binaries,
+# uv and semgrep caches). Measured per-location cost of user-space executables:
+#     C:\Users\<user>\Downloads  36 files  4248 MB
+#     C:\Users\<user>\AppData\Local\Temp  302 files  4088 MB
+# By contrast ALL the event log channels below cost 61 MB, and Prefetch +
+# Amcache + SRUM + registry cost a few hundred MB while answering "what
+# executed" directly. So v1.3 does NOT bulk-copy big user-space binaries:
+#   - "what ran"        -> Prefetch, Amcache, SRUM, registry
+#   - "what was opened" -> Recent LNK and jump lists (collected below, parsed
+#                          by LECmd/JLECmd through the !EZParser module)
+#   - a specific suspect image -> forensics/kape.py copy_extra_files(), which
+#                          copies by exact path with a SHA-256 manifest
+#   - script and shortcut files in staging directories, which are tiny, are
+#     high signal, and are NOT covered by Prefetch when they never executed
+# A commented preset at the end of this file re-enables bulk payload capture
+# if an investigation needs it.
+#
+# Event logs are listed individually because of fact 4 above. Adding a channel
+# means adding an entry; the copy log then shows exactly which channels hit.
+
+Targets:
+    -
+        Name: Prefetch
+        Category: Execution
+        Path: C:\Windows\Prefetch
+        FileMask: "*"
+        Recursive: true
+        Comment: "Program execution traces (what ran, when, how often)"
+    -
+        Name: Amcache
+        Category: Execution
+        Path: C:\Windows\AppCompat\Programs
+        FileMask: "Amcache.hve"
+        Recursive: true
+        Comment: "Executable metadata (path, SHA1, first run)"
+    -
+        Name: SRUM
+        Category: Execution
+        Path: C:\Windows\System32\sru
+        FileMask: "SRUDB.dat"
+        Recursive: true
+        Comment: "Per-application network and resource usage per hour"
+    -
+        Name: WMI-Repository
+        Category: Execution
+        Path: C:\Windows\System32\wbem\Repository
+        FileMask: "*"
+        Recursive: true
+        Comment: "WMI persistence (event subscriptions) and class data"
+    -
+        Name: ScheduledTasks
+        Category: Persistence
+        Path: C:\Windows\System32\Tasks
+        FileMask: "*"
+        Recursive: true
+        Comment: "Scheduled task definitions (XML)"
+    -
+        Name: StartMenu-Startup-ProgramData
+        Category: Persistence
+        Path: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp
+        FileMask: "*"
+        Recursive: true
+    -
+        Name: StartMenu-Startup-User
+        Category: Persistence
+        Path: C:\Users\%user%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+        FileMask: "*"
+        Recursive: true
+    -
+        Name: Registry-SOFTWARE
+        Category: Persistence
+        Path: C:\Windows\System32\config
+        FileMask: "SOFTWARE"
+        Recursive: true
+        Comment: "Run keys and service definitions live here"
+    -
+        Name: Registry-SYSTEM
+        Category: Persistence
+        Path: C:\Windows\System32\config
+        FileMask: "SYSTEM"
+        Recursive: true
+    -
+        Name: Registry-SECURITY
+        Category: Persistence
+        Path: C:\Windows\System32\config
+        FileMask: "SECURITY"
+        Recursive: true
+    -
+        Name: Registry-SAM
+        Category: Persistence
+        Path: C:\Windows\System32\config
+        FileMask: "SAM"
+        Recursive: true
+        Comment: "Local account creation and RID anomalies"
+    -
+        Name: EventLogs-Security
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Security.evtx"
+        Recursive: false
+        Comment: "Logon, process creation, service install, privilege use"
+    -
+        Name: EventLogs-System
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "System.evtx"
+        Recursive: false
+        Comment: "Service and driver state changes, unexpected reboots"
+    -
+        Name: EventLogs-Application
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Application.evtx"
+        Recursive: false
+    -
+        Name: EventLogs-PowerShell-Classic
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Windows PowerShell.evtx"
+        Recursive: false
+        Comment: "Script block logging, classic engine"
+    -
+        Name: EventLogs-PowerShell-Operational
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-PowerShell%4Operational.evtx"
+        Recursive: false
+        Comment: "Script block and module logging - top priority for fileless activity"
+    -
+        Name: EventLogs-RDP-LocalSessionManager
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-TerminalServices-LocalSessionManager%4Operational.evtx"
+        Recursive: false
+        Comment: "Successful and attempted interactive RDP logons"
+    -
+        Name: EventLogs-RDP-RemoteConnectionManager
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Operational.evtx"
+        Recursive: false
+        Comment: "RDP listener and pre-authentication failures"
+    -
+        Name: EventLogs-RDP-CoreTS
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS%4Operational.evtx"
+        Recursive: false
+    -
+        Name: EventLogs-SmbClient
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-SmbClient%4Security.evtx"
+        Recursive: false
+        Comment: "Outbound SMB - lateral movement"
+    -
+        Name: EventLogs-SmbServer
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-SMBServer%4Security.evtx"
+        Recursive: false
+        Comment: "Inbound SMB - remote access to shares"
+    -
+        Name: EventLogs-Defender
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-Windows Defender%4Operational.evtx"
+        Recursive: false
+        Comment: "Detections and, importantly, tamper attempts"
+    -
+        Name: EventLogs-Firewall
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-Windows Firewall With Advanced Security%4Firewall.evtx"
+        Recursive: false
+        Comment: "Rule changes - a classic defense evasion step"
+    -
+        Name: EventLogs-WMI-Activity
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-WMI-Activity%4Operational.evtx"
+        Recursive: false
+        Comment: "WMI execution and subscription creation"
+    -
+        Name: EventLogs-TaskScheduler
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-TaskScheduler%4Operational.evtx"
+        Recursive: false
+        Comment: "Task registration and execution history"
+    -
+        Name: EventLogs-BitsClient
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-Bits-Client%4Operational.evtx"
+        Recursive: false
+        Comment: "BITS transfers - used by several loaders"
+    -
+        Name: EventLogs-Sysmon
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-Sysmon%4Operational.evtx"
+        Recursive: false
+        Comment: "Only present if Sysmon is installed; harmless if absent"
+    -
+        Name: EventLogs-AppLocker
+        Category: Logs
+        Path: C:\Windows\System32\winevt\Logs
+        FileMask: "Microsoft-Windows-AppLocker%4EXE and DLL.evtx"
+        Recursive: false
+        Comment: "Only present if AppLocker is configured"
+    -
+        Name: FirewallLog
+        Category: Logs
+        Path: C:\Windows\System32\LogFiles\Firewall
+        FileMask: "*.log"
+        Recursive: true
+    -
+        Name: Recent-LNK-And-JumpLists
+        Category: Triage
+        Path: C:\Users\%user%\AppData\Roaming\Microsoft\Windows\Recent
+        FileMask: "*"
+        Recursive: true
+        Comment: "LNK and jump lists - proves files were opened even if deleted. Parsed by LECmd/JLECmd"
+    -
+        Name: User-Downloads-Scripts
+        Category: Triage
+        Path: C:\Users\%user%\Downloads
+        FileMask: regex:*.+\.(ps1|vbs|vbe|js|jse|wsf|wsh|hta|bat|cmd|lnk|scf|cpl|reg|jar)
+        Recursive: false
+        Comment: "High signal and tiny. Large vendor installers are deliberately not collected, see header"
+    -
+        Name: User-Desktop-Scripts
+        Category: Triage
+        Path: C:\Users\%user%\Desktop
+        FileMask: regex:*.+\.(ps1|vbs|vbe|js|jse|wsf|wsh|hta|bat|cmd|lnk|scf|cpl|reg|jar)
+        Recursive: true
+        Comment: "Users unpack archives here"
+    -
+        Name: User-Temp-Scripts
+        Category: Triage
+        Path: C:\Users\%user%\AppData\Local\Temp
+        FileMask: regex:*.+\.(ps1|vbs|vbe|js|jse|wsf|wsh|hta|bat|cmd|scf|cpl|lnk)
+        Recursive: true
+        Comment: "Script droppers only. Recursing this path for *.exe costs ~4 GB of installer noise"
+    -
+        Name: Public-All
+        Category: Triage
+        Path: C:\Users\Public
+        FileMask: "*"
+        Recursive: true
+        Comment: "World-writable staging area, normally near-empty"
+    -
+        Name: ProgramData-Root-Scripts
+        Category: Triage
+        Path: C:\ProgramData
+        FileMask: regex:*.+\.(ps1|vbs|js|wsf|hta|bat|cmd|reg)
+        Recursive: false
+        Comment: "Root only - subdirectories are legitimate application installs"
+    -
+        Name: RecycleBin-I-Files
+        Category: Triage
+        Path: C:\$Recycle.Bin
+        FileMask: "$I*"
+        Recursive: true
+        Comment: "Deletion metadata only. The $R payload files are NOT collected - they can be huge"
+    -
+        Name: PowerShell-History
+        Category: Triage
+        Path: C:\Users\%user%\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine
+        FileMask: "ConsoleHost_history.txt"
+        Recursive: true
+        Comment: "Typed command history - frequently the fastest source of truth"
+    -
+        Name: HostsFile
+        Category: Triage
+        Path: C:\Windows\System32\drivers\etc
+        FileMask: "hosts"
+        Recursive: true
+    -
+        Name: DNSCache-Config
+        Category: Triage
+        Path: C:\Windows\System32\dns
+        FileMask: "*"
+        Recursive: true
+
+# %user% is substituted at runtime via --tvars user:<name> (KAPE built-in).
+# For a full-size collection use --target "!SANS_Triage" instead; it is
+# multi-gigabyte by design and is not what the automated pipeline should run.
+#
+# ============================================================================
+# OPTIONAL PRESET - bulk user-space payload capture (disabled)
+# ============================================================================
+# Uncomment the block below, remove the leading "#", only when an
+# investigation needs the actual binaries from user directories. Measured cost
+# on a real host is around 8 GB, almost all of it signed vendor installers.
+#
+# Targets:
+#     -
+#         Name: User-Downloads-All-Executables
+#         Category: Triage-Full
+#         Path: C:\Users\%user%\Downloads
+#         FileMask: regex:*.+\.(exe|dll|msi|scr|iso|img|zip|rar|7z)
+#         Recursive: false
+#     -
+#         Name: User-Temp-All-Executables
+#         Category: Triage-Full
+#         Path: C:\Users\%user%\AppData\Local\Temp
+#         FileMask: regex:*.+\.(exe|dll|msi|scr)
+#         Recursive: true

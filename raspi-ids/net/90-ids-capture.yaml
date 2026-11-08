@@ -1,0 +1,25 @@
+# 采集口（镜像口）网络配置：只收包，不配置任何地址。
+#
+# 为什么用 netplan 而不是直接写 systemd-networkd / NetworkManager 配置：
+# Ubuntu 22.04 的树莓派镜像用 netplan + systemd-networkd，而更新的版本换成
+# netplan + NetworkManager。netplan 两种渲染器都支持，所以这份文件都能生效。
+#
+# ⚠ 安装脚本会先检查这个网卡是不是"你正在用的管理链路"（默认路由 / SSH 所在网卡）。
+#    如果是，会直接拒绝并把网卡名告诉你 —— 否则改完你就再也连不上去了。
+#    正确做法：镜像口用板载以太网（或 USB 网卡），管理走 WiFi / 另一张 USB 网卡。
+#
+# 本文件由 install_pi.sh 按 --iface 生成占位（__IFACE__）
+
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    __IFACE__:
+      # 不要地址：采集口只是被动收包
+      dhcp4: false
+      dhcp6: false
+      accept-ra: false
+      # 不要让系统为了等这块网卡"上线"而卡住启动
+      optional: true
+      # 显式关掉所有会改写/合并帧的硬件特性（见 ids-capture-tuning.sh 的说明）
+      # 注意：这些设置 netplan 支持有限，实际由 ethtool 服务设置，这里保留注释说明意图。

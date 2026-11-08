@@ -1,0 +1,5 @@
+# 运行期最小依赖（Agent / RAG / GUI / 检索层）
+# 训练相关依赖见 training/requirements.txt
+numpy>=1.24
+PyYAML>=6.0
+requests>=2.31

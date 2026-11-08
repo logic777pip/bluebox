@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蓝队 Agent 控制台</title>
+<link rel="icon" href="/static/agent.ico">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" id="health-dot"></span>
+    <h1>蓝队 Agent 控制台</h1>
+  </div>
+  <div class="topright">
+    <span class="pill" id="pill-mode">—</span>
+    <span class="pill muted" id="pill-time">—</span>
+    <button class="btn ghost" id="btn-refresh" title="重新加载当前页">刷新</button>
+  </div>
+</header>
+
+<nav class="sidenav">
+  <button class="nav active" data-page="overview">概览</button>
+  <button class="nav" data-page="config">配置</button>
+  <button class="nav" data-page="reports">报告</button>
+  <button class="nav" data-page="logs">日志</button>
+  <button class="nav" data-page="threat">威胁建模</button>
+  <button class="nav" data-page="contain">封锁</button>
+  <button class="nav" data-page="whitelist">白名单</button>
+  <button class="nav" data-page="actions">AI 动作</button>
+  <button class="nav" data-page="kape">KAPE</button>
+  <div class="navfoot">
+    <div class="hint">只绑 127.0.0.1<br>令牌随启动轮换</div>
+  </div>
+</nav>
+
+<main id="content" class="content">
+  <div class="loading">正在加载…</div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<!-- 通用确认对话框：所有写操作都要经过这里 -->
+<dialog id="confirm-dlg" class="dlg">
+  <form method="dialog">
+    <h3 id="cf-title">确认操作</h3>
+    <div id="cf-body" class="dlgbody"></div>
+    <label id="cf-checkwrap" class="check hidden">
+      <input type="checkbox" id="cf-check"> <span id="cf-checktext">确认</span>
+    </label>
+    <div class="dlgfoot">
+      <button value="cancel" class="btn ghost">取消</button>
+      <button value="ok" class="btn danger" id="cf-ok">执行</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

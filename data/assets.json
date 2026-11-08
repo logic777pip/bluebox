@@ -1,0 +1,61 @@
+{
+  "_comment": "业务归属与端点角色参考表。用于 ① 动作准入闸门判断『这个目标到底是谁』② 只读工具 asset_lookup 的查表数据 ③ 编造判据检测器识别『把 443 说成非标准端口』这类事实错误。IP 一律 RFC5737 文档网段。",
+
+  "critical_assets": {
+    "dc-01": {"ip": "203.0.113.5", "role": "域控", "owner": "iam@corp.example.com", "criticality": "critical"},
+    "jump-01": {"ip": "203.0.113.20", "role": "运维跳板机", "owner": "sre@corp.example.com", "criticality": "critical"},
+    "backup-01": {"ip": "203.0.113.30", "role": "备份服务器", "owner": "sre@corp.example.com", "criticality": "high"},
+    "web-01": {"ip": "198.51.100.11", "role": "对外 Web 前端", "owner": "sre@corp.example.com", "criticality": "high"},
+    "app-02": {"ip": "198.51.100.12", "role": "业务应用服务器", "owner": "sre@corp.example.com", "criticality": "high"}
+  },
+
+  "business_services": {
+    "chrome.exe": {"justification": "浏览器", "protocol": "QUIC / TLS 1.3", "typical_peers": ["公开网站", "白名单域名"], "approved": true},
+    "msedge.exe": {"justification": "浏览器", "protocol": "QUIC / TLS 1.3", "typical_peers": ["公开网站", "白名单域名"], "approved": true},
+    "teams.exe": {"justification": "企业统一通信客户端（语音/视频会议）", "protocol": "RTP / UDP 定长帧", "typical_peers": ["企业 SIP 网关"], "approved": true},
+    "wireguard.exe": {"justification": "IT 统一下发的 VPN 客户端", "protocol": "WireGuard (UDP 51820)", "typical_peers": ["已登记的 VPN 网关"], "approved": true},
+    "openvpn.exe": {"justification": "IT 统一下发的 VPN 客户端", "protocol": "OpenVPN", "typical_peers": ["已登记的 VPN 网关"], "approved": true},
+    "veeamagent.exe": {"justification": "备份代理（夜间备份窗口）", "protocol": "UDP 2055", "typical_peers": ["备份服务器"], "approved": true},
+    "rsyslogd": {"justification": "日志转发到企业 SIEM", "protocol": "syslog UDP 514", "typical_peers": ["SIEM 日志服务器"], "approved": true},
+    "w32time": {"justification": "系统时间同步", "protocol": "NTP UDP 123", "typical_peers": ["已配置 NTP 服务器"], "approved": true},
+    "ssh.exe": {"justification": "运维远程管理", "protocol": "SSH TCP 22", "typical_peers": ["运维跳板机"], "approved": true},
+    "appagent.exe": {"justification": "内部自研监控代理（资产库已登记）", "protocol": "自定义 UDP", "typical_peers": ["内部监控平台"], "approved": true},
+    "svchost.exe": {"justification": "系统服务宿主（需核对路径与签名）", "protocol": "多种", "typical_peers": ["视具体服务而定"], "approved": false}
+  },
+
+  "known_gateway_roles": {
+    "vpn_gateway": {"keywords": ["vpn 网关", "wireguard", "openvpn", "已登记的 vpn 网关清单"], "block_effect": "会切断全部远程办公接入"},
+    "sip_gateway": {"keywords": ["sip 网关", "rtp", "语音会议", "会议室"], "block_effect": "会中断在途语音会议"},
+    "backup_server": {"keywords": ["备份服务器", "备份窗口", "veeam"], "block_effect": "会造成备份作业失败、破坏恢复能力"},
+    "siem_collector": {"keywords": ["siem", "syslog", "日志服务器", "日志源"], "block_effect": "会造成日志盲区，事后无法追溯"},
+    "jump_host": {"keywords": ["跳板机", "运维工作站", "堡垒机"], "block_effect": "会切断运维通道，故障时无法介入"}
+  },
+
+  "well_known_ports": {
+    "22": {"proto": "TCP", "service": "SSH", "note": "标准 SSH 端口"},
+    "25": {"proto": "TCP", "service": "SMTP", "note": "标准邮件端口"},
+    "53": {"proto": "UDP/TCP", "service": "DNS", "note": "标准 DNS 端口，隧道流量常见于此但端口本身标准"},
+    "80": {"proto": "TCP", "service": "HTTP", "note": "标准 Web 端口"},
+    "123": {"proto": "UDP", "service": "NTP", "note": "标准时间同步端口"},
+    "443": {"proto": "TCP/UDP", "service": "HTTPS / QUIC(HTTP3)", "note": "UDP 443 即 QUIC，现代浏览器默认使用，**不是非标准端口**"},
+    "514": {"proto": "UDP", "service": "syslog", "note": "标准日志端口"},
+    "2055": {"proto": "UDP", "service": "NetFlow / Veeam 备份", "note": "标准备份/流数据端口"},
+    "3389": {"proto": "TCP", "service": "RDP", "note": "标准远程桌面端口"},
+    "51820": {"proto": "UDP", "service": "WireGuard", "note": "WireGuard 默认端口"},
+    "8080": {"proto": "TCP", "service": "HTTP-alt", "note": "常见 Web 备用端口"},
+    "8443": {"proto": "TCP", "service": "HTTPS-alt", "note": "常见 Web 备用端口"}
+  },
+
+  "approved_processes_by_host_pattern": {
+    "ws-*": ["chrome.exe", "msedge.exe", "teams.exe", "wireguard.exe", "explorer.exe", "outlook.exe", "svchost.exe"],
+    "srv-*": ["veeamagent.exe", "rsyslogd", "w32time", "svchost.exe", "nginx", "tomcat"],
+    "db-*": ["postgresql", "mysqld", "rsyslogd", "w32time"],
+    "app-*": ["appagent.exe", "java", "tomcat", "nginx"]
+  },
+
+  "notes": [
+    "本表是**参考与准入依据**，不是绝对真相：真实环境应接 CMDB / 资产库 API。",
+    "approved=true 只表示『该进程是企业标准软件』，**不等于**该主机上的该进程一定无恶——仍需结合路径、签名与父进程判断。",
+    "关键点：业务归属成立时，破坏性动作必须**显式反驳**该归属，否则视为误伤。"
+  ]
+}

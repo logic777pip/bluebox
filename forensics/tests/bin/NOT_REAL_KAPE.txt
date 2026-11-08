@@ -1,0 +1,3 @@
+﻿杩欐槸 KAPE 鐨勬祴璇曟浛韬紙test double锛夛紝涓嶆槸鐪熸鐨?KAPE銆?
+瀹冨彧鐢ㄤ簬楠岃瘉鍙栬瘉閾捐矾锛屼笉鍋氫换浣曠湡瀹炲彇璇併€?
+Marker: KAPE-STUB-TEST-DOUBLE

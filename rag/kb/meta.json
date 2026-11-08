@@ -1,0 +1,9 @@
+{
+  "count": 2517,
+  "dim": 1024,
+  "embedder": {
+    "name": "hash_tfidf",
+    "dim": 1024
+  },
+  "content_fingerprint": "45d0f9e8d112d4d2"
+}

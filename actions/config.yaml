@@ -1,0 +1,139 @@
+# ============================================================================
+#  actions/config.yaml — PDCERF 动作层 / 工具适配器配置
+#  所有路径相对项目根（blue-team-agent/）
+# ============================================================================
+
+executor:
+  # true  = 只演练（计划 + 审计落盘，无任何副作用）—— 默认，安全
+  # false = 真实执行（需要真实适配器；仿真靶场需 allow_sim_fallback 才可用）
+  dry_run: true
+
+  # 自动确认两阶段确认（R5）。**只在隔离靶场 / 自测中开启**，
+  # 生产环境必须为 false，否则两阶段确认形同虚设。
+  allow_auto_confirm: false
+
+  # PDCERF 前置约束：处置类动作（不可逆 / 高风险）必须先满足阶段前置
+  #   遏制(C) ← 检测(D)；根除(E) ← 遏制(C)；恢复(R) ← 遏制(C)；复盘(F) ← 检测(D)
+  enforce_prerequisites: true
+
+  # true = 动作的主阶段必须等于案例当前阶段（更严格，会拒绝"跨阶段顺手处置"）
+  strict_phase: false
+
+  # 单案例动作总数上限（防失控循环把环境刷爆）
+  max_actions_per_case: 200
+
+  audit_path: logs/action_audit.jsonl
+  pending_dir: logs/pending_actions
+  confirm_ttl_seconds: 300
+
+policy:
+  # 真实执行模式下是否允许回落到仿真靶场。
+  # true  = 靶场/自测可用（结果会标记 simulated=true）
+  # false = 没有真实适配器就返回 unavailable，绝不"假装执行成功"
+  allow_sim_fallback: true
+
+  # 保护对象：不可逆动作一旦命中，**直接拒绝**（不因 auto_confirm 而放行）
+  # 目的：拦住"封掉自己的跳板机/域控/备份服务器"这类不可恢复的处置事故
+  protected_hosts: [dc-01, jump-01, backup-01]
+  protected_accounts: [svc-backup, admin-ops]
+  protected_domains: [corp.example.com, update.example.com]
+  protected_ips: [203.0.113.5, 203.0.113.20, 203.0.113.30]
+
+adapters:
+  # 匹配顺序：第一个"声明支持该动作且健康"的适配器被执行
+  # ⚠ containment_placeholder 必须排在 sim **前面**：
+  #   否则遏制动作会被 sim 接走并返回"执行成功"，模型会以为已经遏制完毕
+  #   并推进到根除/恢复阶段 —— 那是「假装处置」，比不处置更危险。
+  # sandbox 排在最前：它处理的是 extract/analyze/handoff/contain_threat 四个动作，
+  #   与 soar/kape 的动作集不重叠，放前面是为了让"真实实现优先于占位/仿真"这条
+  #   顺序规则保持单一解读（越靠前越真实）。
+  order: [sandbox, soar, kape, containment_placeholder, filesystem, sim]
+
+  # ---- 取证（KAPE）：`collect_forensics` 动作的落地点 ----
+  # 采集是**只读**的（把产物复制出来），但它会真写文件、真读被采集主机，
+  # 因此不归到 sim 那类"无副作用适配器"里。
+  #
+  # 已在本机核实（kape.exe 1.3.0.2）：
+  #   * 路径 C:\Tools\KAPE\kape.exe（正式安装位置；已用 --tlist/--mlist 校验：
+  #     BlueTeam-Triage 与 !EZParser 均可见，无语法错误/无重名）
+  #   * EZTools 12 个解析器均在 Modules\bin（EvtxECmd/RECmd/SQLECmd 在各自子目录）
+  #     —— EZTools **不由 KAPE 分发**，必须拷进 Modules\bin；
+  #     tools\setup_kape.ps1 -EzToolsFrom <另一个KAPE>\Modules\bin 可一键导入
+  #   * ⚠ KAPE 1.3.0.2 **连 --tlist 都要求管理员**，非管理员直接退出。
+  #     所以真实采集必须用提权终端。
+  kape:
+    enabled: true
+    exe_path: 'C:\Tools\KAPE\kape.exe'
+    output_root: logs/forensics        # 产物根目录（tdest/mdest 都被 jail 在此目录内）
+    tsource: "C:"                     # 要采集的盘符/根目录
+    target: BlueTeam-Triage            # 自定义 target（forensics/targets/）；
+                                       # 全量用 !SANS_Triage（慢、产物大）
+    module: '!EZParser'                # 官方 EZTools 复合解析模块（已核实存在）；
+                                       # 留空 = 只采集不解析
+    extra_args: ""                     # 其余 KAPE 参数（如 --zip）由操作员显式填
+    sim: false                         # true = 用 KAPE 原生 --sim（只校验不复制）
+    require_admin: true                # 非管理员 **拒绝执行**（避免产出残缺证据）
+    execute_enabled: false             # 真实采集的第二道开关（见 forensics/kape.py 注释）
+    max_collect_mb: 4096               # 产物体积预算（MB），超出则标记 oversize 并告警。
+                                       # 实测：v1.1 的 target 静默产出 17826 MB
+                                       # （用户目录里全是厂商安装包），收紧后 428 MB。
+                                       # 设 0 = 不限制（不建议用于自动流水线）
+
+  # ---- 沙箱联动（Sandboxie-Plus）----
+  # 四个动作：提取只读固化 / 静态分析 / 人工动态分析交接包 / 最小影响封锁。
+  # ⚠ 没有动态分析：需求是「禁止 AI 进行动态分析」。
+  #    这不是靠开关关着，而是 `detonate_payload` 在 security/action_schema.ACTION_SPECS
+  #    里根本不存在（default-deny 会直接拒），且 sandbox/ 有 vault 路径守卫 +
+  #    AST 断言（dynamic_handoff.py 连 subprocess 都不 import）。
+  sandbox:
+    enabled: true
+    box_name: BlueTeamDynamic        # 给人工引爆用的盒子名
+    root: logs/sandbox               # 只读库与案例产物根
+    notify: true                     # 提取到载荷后弹 Windows 通知
+    # 真实封锁的第二道开关（与 KAPE 采集同一纪律）：
+    # false 时 contain_threat 只出手动计划，绝不改防火墙。
+    execute_enabled: false
+    ttl_seconds: 14400               # 封锁规则存活 4 小时，到期回收
+    # 查不到本机网络事实（地址/网关/DNS）时是否仍允许封锁。
+    # false = fail-closed（推荐）：因为无法确认目标不是网关/DNS，
+    # 封错会让整机断网 —— 那正是"干扰业务"。
+    allow_unverified_target: false
+
+  # ---- 遏制：**仅占位** ----
+  # 用户要求：遏制阶段仅使用占位。本适配器永远不改变系统状态，
+  # 只回灌"该做什么 + 代价是什么"，把"要不要做"留给人。
+  containment_placeholder:
+    enabled: true
+    # true = 遏制类动作**只**由占位接管（不会落到 sim "假装成功"）
+    # 接真实 SOAR/EDR 时：把本项置 false，并让 soar 排在它前面。
+    placeholder_only: true
+    # 接管哪些动作。留空 = 默认集合（isolate_host/block_ip/block_domain/
+    # disable_account/revoke_session/restrict_account/kill_process/quarantine_file）
+    placeholder_actions: []
+
+  # ---- 真实编排平台（SOAR / EDR / 防火墙管理面）----
+  soar:
+    enabled: false                 # 接入真实环境时改为 true
+    base_url: ""                   # 例: https://soar.corp.example/api
+    prefix: actions
+    api_key_env: SOAR_API_KEY      # R4：密钥只从环境变量读，缺失即不可用
+    require_api_key: true
+    timeout: 15                    # R2：单次请求超时（秒）
+    retries: 2                     # R2：仅对 idempotent_actions 生效
+    verify_tls: true
+    headers: {}
+    # 未配置 capabilities 时视为支持全部白名单动作（由对方平台自行拒绝）
+    # capabilities: [isolate_host, block_ip, query_logs]
+    idempotent_actions:
+      [query_logs, query_flow, asset_lookup, enrich_ioc,
+       verify_backup, verify_integrity, collect_timeline]
+
+  # ---- 本地沙箱（证据归档 / 复盘报告 / 沙箱内样本隔离）----
+  filesystem:
+    enabled: true
+    root: logs/toolbox             # 沙箱根；所有文件动作都被 jail 在此目录内
+
+  # ---- 离线仿真靶场（确定性、无副作用，用于自测与闭环演练）----
+  sim:
+    enabled: true
+    seed: 3407

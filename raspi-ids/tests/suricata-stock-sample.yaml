@@ -1,0 +1,158 @@
+%YAML 1.1
+---
+# 本文件是**测试夹具**：按 Suricata 6.0 发行版 suricata.yaml 的*结构*缩写的样例，
+# 用来验证 tune_suricata.py 的块/键定位是否正确（缩进、列表项内联值、
+# `- flow` 标量项、注释行等）。它不会被直接部署到树莓派上。
+#
+# 之所以要这个夹具：开发机上没有 Suricata，无法用 `suricata -T` 验证；
+# 于是退一步保证「打补丁后仍是合法 YAML」+「值落在正确的键上」，
+# 再由安装脚本在真机上用 `suricata -T` 做最终校验。
+
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "any"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    AIM_SERVERS: "$EXTERNAL_NET"
+    DC_SERVERS: "$HOME_NET"
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+
+default-log-dir: /var/log/suricata/
+
+stats:
+  enabled: no
+  # interval: 8 seconds
+
+outputs:
+  - fast:
+      enabled: yes
+      filename: fast.log
+
+  - eve-log:
+      enabled: yes
+      filetype: regular #regular|syslog|unix_dgram|unix_stream|redis
+      filename: eve.json
+      #redis:
+      #  server: 127.0.0.1
+      #  port: 6379
+      #  async: true
+      #pcap-file: false
+      # Community Flow ID
+      community-id: false
+      community-id-seed: 0
+      types:
+        - alert:
+            #payload: yes             # enable dumping payload in Base64
+            #payload-buffer-size: 4kb
+            #payload-printable: yes
+            #packet: yes
+            metadata: yes
+            tagged-packets: yes
+        - anomaly:
+            enabled: no
+        - http:
+            extended: no
+            dump-all-headers: no
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: no
+        - files:
+            force-magic: no
+        - ssh
+        - flow
+        - netflow
+        - stats:
+            totals: yes
+            threads: no
+
+  - http-log:
+      enabled: no
+      filename: http.log
+
+  - tls-log:
+      enabled: no
+      filename: tls.log
+
+  - drop:
+      enabled: no
+
+af-packet:
+  - interface: eth0
+    #bpf-filter: "tcp and port 25"
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    # use-mmap: yes
+    # tpacket-v3: yes
+    ring-size: 2048
+    block-size: 32768
+    buffer-size: 32768
+    threads: auto
+    #disable-promisc: no
+
+  - interface: default
+
+pcap:
+  - interface: eth0
+
+pcap-file:
+  checksum-checks: auto
+
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+      ja3-fingerprints: no
+    http:
+      enabled: yes
+      memcap: 64mb
+    dns:
+      tcp:
+        enabled: yes
+
+flow:
+  memcap: 64mb
+  hash-size: 65536
+
+stream:
+  memcap: 64mb
+  checksum-validation: yes
+
+detect:
+  profile: high
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+
+flow-timeouts:
+  default:
+    new: 30
+    established: 300
+  tcp:
+    new: 60
+    established: 3600
+  udp:
+    new: 30
+    established: 300
+
+runmode: autofp
+max-pending-packets: 1024
+
+default-rule-path: /var/lib/suricata/rules
+rule-files:
+  - suricata.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config

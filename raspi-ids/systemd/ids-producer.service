@@ -1,0 +1,38 @@
+[Unit]
+Description=Blue Team IDS - eve.json 转发到 Redis Stream
+Documentation=file:///opt/blueteam-ids/README.md
+After=network-online.target redis-server.service suricata-ids.service
+Wants=network-online.target redis-server.service
+# 注意：**不** Wants=suricata-ids.service。
+# 转发器先起来、等 eve.json 出现，比反过来更稳：
+# 否则 Suricata 重启期间转发器会跟着重启，容易丢一段事件。
+# （转发器自身带等待文件出现的逻辑；Redis 不在线时会写 spool 等恢复。）
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/blueteam-ids
+# --allow-spool-start：Redis 慢启动也不要让转发器退出，先落盘缓冲
+ExecStart=/usr/bin/python3 /opt/blueteam-ids/suricata_redis_producer.py \
+    --broker ${IDS_BROKER} \
+    --stream ${IDS_STREAM} \
+    --eve-path ${IDS_EVE_PATH} \
+    --max-events-per-sec ${IDS_MAX_EPS} \
+    --maxlen ${IDS_MAXLEN} \
+    --spool /var/lib/suricata-redis/spool.jsonl \
+    --allow-spool-start
+Restart=always
+RestartSec=5
+# 密码从 systemd 环境文件读（EnvironmentFile 权限 600），不进命令行、不进 ps 输出
+StateDirectory=suricata-redis
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/suricata-redis
+ProtectKernelTunables=yes
+RestrictRealtime=yes
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target

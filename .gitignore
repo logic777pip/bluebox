@@ -1,0 +1,62 @@
+# ---- 模型与权重 ----
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+models/
+outputs/
+deployment/gguf/
+
+# ---- llama.cpp 部署产物（二进制 / 下载缓存 / 转换脚本源码 / 运行态）----
+deployment/llamacpp/bin/
+deployment/llamacpp/cache/
+deployment/llamacpp/src/
+deployment/llamacpp/models/
+deployment/llamacpp/server.log
+deployment/llamacpp/.server.pid
+deployment/llamacpp/deploy_state.json
+
+# ---- 数据（体积大且含敏感内容）----
+data/*.jsonl
+!data/*.sample.jsonl
+data/raw/
+data/processed/
+data/rl_trajectories.jsonl
+
+# ---- 日志与报告（可能含敏感信息）----
+logs/*
+!logs/.gitkeep
+*.log
+wandb/
+runs/
+
+# ---- 环境 ----
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 凭据（任何情况下都不入库）----
+.env
+.env.*
+*.pem
+*.key
+secrets.yaml
+credentials.json
+
+# ---- 编辑器 / 系统 ----
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 靶场 ----
+cyber_range/third_party/
+cyber_range/CybORG/

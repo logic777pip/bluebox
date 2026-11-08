@@ -1,0 +1,17 @@
+[Unit]
+Description=Blue Team IDS - 采集口硬件层调优（关 GRO/LRO、开混杂）
+DefaultDependencies=no
+After=sys-subsystem-net-devices-${IDS_IFACE}.device
+Before=suricata-ids.service
+# 必须在 Suricata 之前把 GRO/LRO 关掉，否则前一段流量是失真的
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/blueteam-ids
+ExecStart=/opt/blueteam-ids/ids-capture-tuning.sh ${IDS_IFACE}
+
+[Install]
+WantedBy=multi-user.target

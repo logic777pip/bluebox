@@ -1,0 +1,37 @@
+# 统一行尾，避免 Windows 上编辑 Linux 脚本产生 CRLF 导致 bad interpreter
+* text=auto eol=lf
+
+# Linux 脚本强制 LF
+*.sh      text eol=lf
+Dockerfile text eol=lf
+Makefile  text eol=lf
+*.list    text eol=lf
+*.conf    text eol=lf
+
+# 树莓派 IDS 侧：systemd / netplan / redis 配置**必须** LF。
+# CRLF 的 .network 会被 systemd-networkd 直接忽略，redis.conf 也会解析失败。
+raspi-ids/** text eol=lf
+*.service text eol=lf
+*.network text eol=lf
+*.socket  text eol=lf
+
+# KAPE 规则文件：按 KAPE 生态的习惯用 CRLF。
+# ⚠ 更重要的是它们必须**纯 ASCII** —— KAPE 按 ANSI 解析，
+# 非 ASCII 字节会直接导致 "Syntax error in xxx.tkape"，
+# 而且 target 会从 --tlist 里静默消失（不报错、就是不见了）。
+# tools/setup_kape.ps1 安装时会自动剔除非 ASCII 并转 CRLF，
+# 但源文件也请保持 ASCII（中文说明写进 docs/）。
+*.tkape  text eol=crlf
+*.mkape  text eol=crlf
+
+# Windows 脚本强制 CRLF
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制
+*.gguf    binary
+*.safetensors binary
+*.bin     binary
+*.pt      binary
+*.pkl     binary

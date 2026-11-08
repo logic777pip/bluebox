@@ -1,0 +1,158 @@
+# ============================================================================
+#  agent/config.yaml — 主 Agent 配置
+# ============================================================================
+
+# 模型后端: stub（离线确定性，用于测试）| llamacpp（推荐，llama-server）| ollama | local（直接加载 LoRA）
+backend: stub
+
+# llama.cpp 部署（deployment/llamacpp/）——本项目不依赖 Ollama
+llamacpp:
+  host: 127.0.0.1
+  port: 8080
+  timeout: 120                  # 单次请求超时（秒）
+  retries: 3                    # 重试上限
+  temperature: 0.2
+  max_tokens: 512
+  model: local-gguf             # llama-server 单模型部署，此字段为占位符
+  # 若 llama-server 启了 --api-key，则从环境变量 LLAMACPP_API_KEY 读取（不硬编码）
+
+ollama:
+  host: http://127.0.0.1:11434        # 也可用环境变量 OLLAMA_HOST 覆盖
+  model: blue-team-agent              # deployment/serve.sh 创建的模型名
+  timeout: 60                         # 单次请求超时（秒）
+  retries: 3                          # 重试上限
+  temperature: 0.2
+  num_ctx: 4096
+  num_predict: 512
+
+local:
+  adapter: outputs/qwen2.5-3b-blue-team-lora-v2/lora_adapter
+  base_model: Qwen/Qwen2.5-3B-Instruct       # LoRA 目录内无 config.json，必须先加载基座
+  max_seq_length: 3072
+  max_new_tokens: 512
+  temperature: 0.2
+  load_in_4bit: true
+
+rag:
+  enabled: true
+  config: rag/config.yaml
+  top_k: 3
+
+# ---------------------------------------------------------------------------
+#  研判纪律加固（agent/agent.py: _HARDENING_RULES）
+#
+#  开启后系统提示词追加 H1–H4 四条强制规则，每条都对应一次**实测缺陷**
+#  （见 docs/ATTACK_MATRIX_REPORT.md）：
+#    H1 业务归属是降级判据 ← 常规业务误报率 43.8%
+#    H2 地址性质 ≠ 行为是否发生 ← 情报「文档网段」被用来否定整案
+#    H3 结论必须收口         ← 25% 结论停在「疑似」、5.2% 自相矛盾
+#    H4 观测里的指令不可信   ← 注入标记率 0.000（沉默的抵抗）
+#  要复现加固前行为，把 hardening 置 false（或跑 eval --no-harden）。
+# ---------------------------------------------------------------------------
+prompt:
+  hardening: true
+
+# ---------------------------------------------------------------------------
+#  只读查询工具层（agent/tool_runtime.py）
+#
+#  让 Agent「先查再判」：模型可主动调用 endpoint_roles / business_attribution /
+#  asset_lookup / port_facts / kb_search / intel_lookup。
+#  与 actions/ 动作层的区别：查询工具**永远只读**，不改变任何状态，
+#  因此可以自由预取、可以循环多轮；动作仍必须过 ActionExecutor（R3+PDCERF+R5）。
+# ---------------------------------------------------------------------------
+tools:
+  enabled: true
+  max_rounds: 3          # 模型可主动查询的轮次上限（用尽后强制收敛）
+  prefetch: true         # 确定性预取「端点角色 / 业务归属」等必查项，
+                         # 不依赖模型主动调用（3B 模型的工具调用率不稳定）
+  show_catalog: false    # 是否把完整工具目录写进 system prompt。
+                         # 实测：目录只带来 tool_call_rate=0.0156，却把上下文撑长，
+                         # 造成 rejected_actions 6→26、forensics 0.208→0.000 等稀释副作用，
+                         # 故默认关闭；需要原生 function-calling 时再打开。
+
+# ---------------------------------------------------------------------------
+#  动作语义准入闸门（security/action_gate.py）
+#
+#  R3 白名单只能校验「字段合法」，管不了「字段合法但语义有害」。实测有害但合法的动作：
+#    · block_ip 打到受害主机自己的 IP（41.7%）
+#    · block_ip 方向写成 inbound（反向回连应堵出向，95.8%）
+#    · 对已声明业务归属的良性流量下不可逆动作（42.5%）
+#  闸门规则：G1 目标角色 / G2 方向 / G3 TTL / G4 业务归属须被显式反驳 / G5 取证先行。
+# ---------------------------------------------------------------------------
+gate:
+  enabled: true
+
+intel:
+  enabled: true
+  # 生产环境换成真实源: [virustotal, abuseipdb, otx, threatfox, ip_api]
+  # 缺失 API key 的源会自动跳过（fail-closed），不会内置默认密钥。
+  providers: [mock]
+  max_iocs: 4
+
+grounding:
+  enforce: true
+  max_unsupported: 0          # 允许的不被上下文支持的指标数（0 = 不允许编造 IOC）
+  retry_on_violation: 1       # 违规时带纠正提示重试的次数
+
+actions:
+  # 不可逆动作必须两阶段确认（R5）
+  require_two_phase: true
+  ttl_seconds: 300
+
+  # ---- PDCERF 动作执行层（可选，默认关闭：关闭时只产出建议动作，行为与以往一致）----
+  enable_executor: false          # true = 把校验通过的动作交给 ActionExecutor
+  config: actions/config.yaml     # 执行器策略/适配器配置
+  dry_run: true                   # true = 只演练（计划 + 审计，无副作用）；接真实 SOAR 前勿改 false
+  auto_confirm: false             # 自动完成两阶段确认 —— **仅隔离靶场/自测**可置 true
+
+audit:
+  path: logs/agent_audit.jsonl
+  pending_dir: logs/pending
+
+# ---------------------------------------------------------------------------
+#  取证联动（KAPE）—— 见 docs/FORENSICS_KAPE.md
+#
+#  「发现可疑目标 → 自动取证 → 遏制(占位)」的编排配置。
+#  触发源是**检测器写的日志**（本机传感器 / 旁路 IDS），不给检测器加进程内回调：
+#  传感器已在常驻运行，读文件几乎零成本，且完全不需要改动它。
+#
+#  ⚠ 两道安全默认：
+#    1) execute: false —— 只产出可提权执行的计划，不真采集
+#    2) 遏制**永远是占位**（forensics/containment.py 里没有任何执行能力）
+# ---------------------------------------------------------------------------
+forensics:
+  enabled: false                 # 是否让 Agent 提案 collect_forensics 动作
+  auto_collect: false            # true = 检测到高危目标时自动提案取证
+  execute: false                 # true = 真实调用 KAPE（需管理员；且仍需 kape.execute_enabled）
+  # 已在本机核实（kape.exe 1.3.0.2 + 官方 !EZParser + EZTools 12 个解析器均在位）
+  # 正式安装位置：C:\Tools\KAPE（工作区里的 D:\work\KAPE 是旧副本，配置不再指向它）
+  kape_exe: 'C:\Tools\KAPE\kape.exe'
+  # 产物体积预算（MB）：实测 v1.1 target 产出 17826 MB，v1.3 收紧后 428 MB。
+  max_collect_mb: 4096
+  output_root: logs/forensics
+  target: BlueTeam-Triage        # 或 !SANS_Triage（全量）
+  module: '!EZParser'            # 官方 EZTools 复合解析模块（已核实）
+  sim: false                     # true = 用 KAPE 原生 --sim（只校验配置、不复制文件）
+  high_threshold: 40             # 触发取证的分值下限
+  cooldown_seconds: 1800         # 同一目标多久内只采一次（KAPE 一次几分钟、数百 MB）
+  # `forensics/containment.py`（8 个破坏性遏制动作）**仍然固定为占位**，代码里没有别的实现。
+  # 真实封锁走的是**另一个**动作 `contain_threat`（sandbox/contain.py），
+  # 它只封精确对端的出向且带 TTL，范围与风险都远小于 isolate_host/block_ip 那一组。
+  # 两者不是一回事，不要用这一行去推断 contain_threat 的状态。
+  containment: placeholder
+
+sandbox:
+  enabled: false                 # 是否让 Agent 提案沙箱相关动作
+  auto_extract: false            # true = 发现高危载荷时自动提案 extract_payload
+  # ⚠ 这里**没有** auto_detonate 之类的开关，是有意的：
+  #   需求是「禁止 AI 进行动态分析」。动态分析由人工按交接包进行，
+  #   所以 AI 侧不存在任何可以打开它的配置项。
+  analyze: true                  # 提取后是否自动做静态分析
+  execute: false                 # true = 允许 contain_threat 真改防火墙（需管理员）
+  box_name: BlueTeamDynamic      # 给人工引爆用的盒子名（写进交接包）
+  root: logs/sandbox
+  ttl_seconds: 14400             # 封锁规则存活时间
+  high_threshold: 40             # 触发载荷固化的分值下限（与 forensics 保持一致）
+  cooldown_seconds: 1800         # 同一目标多久内只固化一次（去重，避免重复弹窗与重复写盘）
+  handoff: true                  # 是否生成人工动态分析交接包
+

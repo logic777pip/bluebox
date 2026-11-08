@@ -1,0 +1,36 @@
+[Unit]
+Description=Blue Team IDS - Suricata 被动采集（旁路镜像口）
+Documentation=file:///opt/blueteam-ids/README.md
+# 必须要等采集口调优做完：GRO/LRO 没关掉之前开始抓包，前一段流量就是失真的
+After=network-online.target ids-capture.service
+Wants=network-online.target ids-capture.service
+
+[Service]
+Type=simple
+# 不启用发行版自带 unit 的 -D（后台）模式：systemd 自己管进程更可靠，
+# 而且我们要能直接看到 Suricata 的启动错误。
+# --af-packet=$IFACE 显式指定采集口：比只依赖 yaml 更确定（CLI 优先于配置）。
+EnvironmentFile=-/etc/default/blueteam-ids
+ExecStartPre=/usr/sbin/suricata -T -c /etc/suricata/suricata.yaml --af-packet=${IDS_IFACE}
+ExecStart=/usr/sbin/suricata -c /etc/suricata/suricata.yaml --af-packet=${IDS_IFACE} --pidfile /run/suricata-ids.pid --user root
+Restart=on-failure
+RestartSec=10
+# 连续失败就停，别无限重启把 CPU 烧了
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 只读根 + 最小权限。采集需要 NET_RAW/NET_ADMIN，这里保持 root 但收紧其余权限。
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/suricata /var/lib/suricata /run
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+MemoryMax=1200M
+CPUQuota=80%
+# 日志进 journald；eve.json 走 tmpfs（见 /etc/fstab），不写 SD 卡
+
+[Install]
+WantedBy=multi-user.target

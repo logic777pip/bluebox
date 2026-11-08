@@ -1,0 +1,99 @@
+# ============================================================================
+#  training/config.yaml — 蓝队应急响应 Agent QLoRA 微调配置
+#  硬件目标: RTX 5060 8GB VRAM / 32GB RAM / 单卡
+#  所有路径均为【相对路径】，统一相对项目根目录 (blue-team-agent/)
+# ============================================================================
+
+project:
+  name: blue-team-agent
+  seed: 3407
+  output_dir: outputs            # 相对项目根
+  log_dir: logs
+  report_file: logs/train_report.json
+
+model:
+  base_model: Qwen/Qwen2.5-3B-Instruct
+  max_seq_length: 2048           # 8GB 显存下的安全值；OOM 时降到 1024
+  dtype: bfloat16                # RTX 5060 (Blackwell, sm_120) 原生支持 bf16
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4       # QLoRA NF4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+  attn_implementation: sdpa      # 显式禁用 flash-attn（5060 兼容性未验证）
+  # Qwen2.5 在 transformers 中有原生实现，无需执行远端代码；
+  # 置 false 可避免 unsloth 弹出「确认执行远程代码」的交互告警，也符合最小权限原则。
+  trust_remote_code: false
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  use_rslora: false
+  random_state: 3407
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+data:
+  train_file: data/sft_dataset.jsonl        # {"messages":[{role,content},...]}
+  eval_file: data/eval_dataset.jsonl
+  dataset_text_field: text                  # 由 chat template 渲染后写入
+  max_samples: 0                            # 0 = 全部
+  packing: false                            # 8GB 显存下关闭，避免长度爆炸
+
+training:
+  # v2：重新平衡数据（synth 行为对齐占 10%、cti 压到 9%）后的第二轮训练
+  output_dir: outputs/qwen2.5-3b-blue-team-lora-v2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8            # 有效 batch = 1 * 8 = 8
+  num_train_epochs: 2
+  max_steps: -1                             # >0 时覆盖 num_train_epochs（冒烟测试用）
+  learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  optim: adamw_8bit                         # bitsandbytes 8-bit，省显存
+  fp16: false
+  bf16: true                                # 与 model.dtype=bfloat16 配对
+  logging_steps: 1                          # 每步打印 loss / lr / 显存
+  eval_strategy: steps
+  eval_steps: 50
+  save_strategy: steps
+  save_steps: 100
+  save_total_limit: 2
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  group_by_length: true
+  # ⚠ Windows 必须为 0：unsloth 会往数据集里注入闭包函数
+  #   (enable_padding_free_metadata.<locals>.torch_call_with_padding_free_metadata)，
+  #   spawn 子进程时无法 pickle，报 AttributeError: Can't pickle local object。
+  #   Linux/WSL 下可调到 2~4 提升吞吐。
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  train_on_responses_only: true             # 只在 assistant 片段上算 loss
+  response_template: "<|im_start|>assistant\n"
+  instruction_template: "<|im_start|>user\n"
+  report_to: none                           # 单机训练，不上报 wandb
+  seed: 3407
+
+memory:
+  vram_warn_gb: 7.5                         # 显存红线，超过即告警
+  vram_total_gb: 8.0
+  fallback_batch_size: 1
+  fallback_max_seq_length: 1024
+
+export:
+  merge_16bit: false                        # 训练结束后是否合并为 16bit 全权重
+  merged_dir: outputs/qwen2.5-3b-blue-team-merged-v2
+  gguf_dir: deployment/gguf
+  gguf_quant: q4_k_m                        # 部署量化格式

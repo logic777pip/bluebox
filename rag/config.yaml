@@ -1,0 +1,33 @@
+version: 1
+
+# 向量库目录（相对项目根）
+kb_dir: rag/kb
+
+embedder:
+  # hash = 自带离线词法后端（零依赖）；st = sentence-transformers（需安装并下载模型）
+  backend: hash
+  dim: 1024
+  st_model: BAAI/bge-small-zh-v1.5
+
+retrieval:
+  top_k: 5
+  min_score: 0.05
+  # 词法精确命中（IP / 哈希 / T15xx）额外并入的结果数，保证 IOC 不会被语义相似度淹没
+  exact_top_k: 3
+  max_context_chars: 4000
+
+build:
+  seeds_file: rag/seeds/blue_team_seed.jsonl
+  include_corpus: true               # 是否把 data/*.jsonl 的领域回答也入库
+  corpus_files:
+    - data/eval_dataset.jsonl
+    - data/sft_dataset.jsonl
+  corpus_sources: [cti, blackbox_cot, phishing_soc, synth_action]
+  chunk_chars: 900
+  chunk_overlap: 120
+
+# 抗幻觉约束（注入提示词）
+grounding:
+  # 答案中出现的 IOC / 技术编号必须能在检索上下文或本案观测中找到，否则标记为 unsupported
+  enforce: true
+  max_unsupported: 0                 # 允许的不被支持的指标数量（0 = 不允许编造）
